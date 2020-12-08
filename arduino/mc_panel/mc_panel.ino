@@ -4,6 +4,9 @@
  * A MODCOMP Control Panel Controller
  * Version 1.0             12/04/2020
  * 
+ * Revision History
+ * 12/08/2020       Added to github, added 2nd option for program 0
+ * 
  * Target:  Arduino Nano
  * 
  * I/O Map:
@@ -30,6 +33,11 @@
  * A06 = unused (I ONLY)
  * A07 = unused (I ONLY)
  */
+
+#if defined(ARDUINO_AVR_NANO)
+#else
+#error Unsupported hardware - Firmware targets Arduino Nano ONLY at this time.
+#endif
 
 #include "mc_panel.h"
 

@@ -11,6 +11,7 @@
 #define L_PROG_LAMPTEST     3
 #define L_PROG_KNIGHT_RIDER 4
 #define L_PROG_DEBUG        5
+#define L_PROG_RUN_SIM2     0xC000 /* switches 14 and 15 up */
 
 #define L_EO_CLK_SW_CSI     1   /* Emulation Option: Switches are only clocked in with CSL INT when set.
                                    When cleared (default behavior), switches take immediate effect. */
@@ -139,7 +140,8 @@ void cpu_execute()
   if ( cpu_state.boot_state == L_BOOT_RUNNING &&
        TSTBIT(cpu_state.panel_status_2, L_RB_RUN) )
   {
-    if (m_boot_program == L_PROG_RUN_SIM)
+    if (m_boot_program == L_PROG_RUN_SIM ||
+        m_boot_program == L_PROG_RUN_SIM2)
     {
       prog_run_sim();
     }
@@ -263,7 +265,7 @@ void prog_run_sim()
     cpu_state.panel_status_2 = CLRBIT(cpu_state.panel_status_2, L_RB_C);
   }
 
-  dw2 = cpu_state.r[0];
+  dw2 = (cpu_state.r[0] & 0x3fff);
 
   delay((unsigned long)dw2 * 10L);  
 }
