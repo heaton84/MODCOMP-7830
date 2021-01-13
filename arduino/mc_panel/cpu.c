@@ -18,6 +18,7 @@
 
 struct s_cpu_state cpu_state;
 int m_boot_program;
+int m_first_tick;               // Set for first step through each program
 
 void cpu_init()
 {
@@ -56,20 +57,18 @@ void cpu_pre_execute()
     // Deferred behavior: Only load R0 while CSL INT active
 
     if ( cpu_state.hw_bits & L_CSLINT )
-    {
       cpu_state.r[0] = panel_read(L_REG_R0_LO) | ( panel_read(L_REG_R0_HI) << 8 );
-    }
   }
     
   // Grab register selection & context
   db = panel_read(L_REG_DISPLAY);
-  cpu_state.panel_ctxt    = db & 0x0f;
-  cpu_state.panel_reg_sel = (db & 0xf0) >> 4;
+  cpu_state.panel_ctxt    = db & 0x0f;        // Context (iop/mbc/ctxt/map)
+  cpu_state.panel_reg_sel = (db & 0xf0) >> 4; // Display select (eau/cpu switches)
   
   // Snapshot CPU control word and display selection
   db = panel_read(L_REG_CPU_CTRL);
-  cpu_state.panel_ccn  = db & 0x0f;
-  cpu_state.panel_dspn = (db & 0xf0) >> 4;
+  cpu_state.panel_ccn  = db & 0x0f;         // CPU Control Nibble (register 4 low word)
+  cpu_state.panel_dspn = (db & 0xf0) >> 4;  // Display Nibble (mem/ints/psw/istk)
 
   // Now deal with CPU control if so selected
   if ( cpu_state.hw_bits & L_HALT )
@@ -82,9 +81,9 @@ void cpu_pre_execute()
       // M CLEAR has been depressed, clear out state
       cpu_state.boot_state = L_BOOT_CLEARED;
 
-      panel_write_word(L_REG_ADDR_LO, 0);
+      panel_write_word(L_REG_ADDR_LO, 1);  // "Sets" PR to 1
       panel_write_word(L_REG_DATA_LO, 0);      
-      panel_write_word(L_REG_STAT_LO, 0);
+      //panel_write_word(L_REG_STAT_LO, 16);
 
       cpu_state.panel_status_2 = 0; // Clear NZOC, MERR, etc.
     }
@@ -95,10 +94,12 @@ void cpu_pre_execute()
 
       // Grab switches and select program
       m_boot_program = cpu_state.r[0];
+      m_first_tick   = 1;
 
       // Update our pattern
-      panel_write_word(L_REG_ADDR_LO, 0);
+      panel_write_word(L_REG_ADDR_LO, 1);
       panel_write_word(L_REG_DATA_LO, m_boot_program | 0xae8);
+      //panel_write_word(L_REG_STAT_LO, 32);
     }
     else if ( cpu_state.panel_ccn == L_CC_SINGLE_STEP )
     {
@@ -116,6 +117,8 @@ void cpu_pre_execute()
         cpu_state.emu_options = panel_read_word(L_REG_R0_LO);
       }
     }
+
+    cpu_display_halt();
   }
   else
   {
@@ -132,6 +135,32 @@ void cpu_pre_execute()
   panel_write(L_REG_STAT_HI, cpu_state.panel_status_2);
 
   cpu_state.panel_ccdb = cpu_state.panel_ccn;
+}
+
+void cpu_display_halt()
+{
+  // Invoked when CPU is in a HALT state. Decides what should be displayed on the panel.
+
+  // panel_ctxt:    iop /mbc /ctxt/map
+  // panel_reg_sel: eau /eau /cpu /cpu
+  // panel_dspn:    mem /ints/psw /istk
+
+  // mem: show memory
+  // ints: show ints (not used)
+  // psw: show program status word (not used)
+  // istk: show some sort of stack? (not used)
+
+  if ( cpu_state.panel_dspn & 0x01 )
+  {
+    // Showing Memory
+  }
+  else
+  {
+    // Showing Register
+
+    panel_write(L_REG_ADDR_LO, cpu_state.panel_reg_sel & 0x0f );
+    panel_write(L_REG_DATA_LO, cpu_state.r[ cpu_state.panel_reg_sel & 0x0f ]);
+  }
 }
 
 void cpu_execute()
@@ -170,6 +199,10 @@ void cpu_execute()
       // Throw an MERR in protest
       cpu_state.panel_status_2 = SETBIT(cpu_state.panel_status_2, L_RB_M_ERR);
     }
+
+    cpu_state.pr++;
+
+    m_first_tick = 0;
   }
   else if ( m_boot_program == L_PROG_DEBUG )
   {
@@ -184,8 +217,7 @@ void cpu_display_output()
   int data;
   
   // Address is always PR
-  panel_write(L_REG_ADDR_LO, cpu_state.pr & 0xff);
-  panel_write(L_REG_ADDR_HI, (cpu_state.pr & 0xff00) >> 8);
+  panel_write_word(L_REG_ADDR_LO, cpu_state.pr & 0x00ff);
 
   // Data depends upon context
   if (cpu_state.panel_ctxt & 1) // MEM
@@ -199,8 +231,7 @@ void cpu_display_output()
     data = cpu_state.r[cpu_state.panel_reg_sel];
   }
 
-  panel_write(L_REG_DATA_LO, data & 0xff);
-  panel_write(L_REG_DATA_HI, (data & 0xff00) >> 8);
+  panel_write_word(L_REG_DATA_LO, data);
 
   // Build up status
   data = 0;
@@ -228,34 +259,33 @@ void cpu_display_output()
 // Simulate a running MODCOMP computer
 void prog_run_sim()
 {
-  static int dw = 0;
-  static int dw2 = 0;
-
-  dw++;
-
-  dw2 = rand_int();
+  // R2: Simulated Instruction
+  // R3: Scratch Area
   
-  if (dw2 >= 30000)
+  cpu_state.r[2] = rand_int();
+  
+  if (cpu_state.r[2] >= 32000)
   {
     // Simulate a "jump"
-    dw = rand_int();
+    cpu_state.pr = rand_int();
   }
-  else if (dw2 >= 15000)
+  else if (cpu_state.r[2] >= 15000)
   {
     // Simulate a loop
-    dw2 = rand_int() / 100;
+    cpu_state.r[3] = abs(rand_int()) / 100;
 
-    dw -= dw2;
+    if (cpu_state.r[3] < cpu_state.pr)
+    {
+      cpu_state.pr -= cpu_state.r[3];
+    }
   }
   
-  panel_write_word(L_REG_ADDR_LO,dw);
+  panel_write_word(L_REG_ADDR_LO, cpu_state.pr);
+  panel_write_word(L_REG_DATA_LO, cpu_state.r[2]);
 
-  dw2 = rand_int();
-  panel_write_word(L_REG_DATA_LO,dw2);
+  cpu_state.r[3] = rand_int();
 
-  dw2 = rand_int();
-
-  cpu_state.panel_status_2 = (cpu_state.panel_status_2 & 0x0f) | (dw2 & 0xf0);
+  cpu_state.panel_status_2 = (cpu_state.panel_status_2 & 0x0f) | (cpu_state.r[3] & 0xf0);
 
   // If zero, make sure negative is clear
   if (TSTBIT(cpu_state.panel_status_2, L_RB_Z))
@@ -265,28 +295,27 @@ void prog_run_sim()
     cpu_state.panel_status_2 = CLRBIT(cpu_state.panel_status_2, L_RB_C);
   }
 
-  dw2 = (cpu_state.r[0] & 0x3fff);
+  cpu_state.r[3] = (cpu_state.r[0] & 0x3fff);
 
-  delay((unsigned long)dw2 * 10L);  
+  delay((unsigned long)cpu_state.r[3] * 10L);  
 }
 
 
 // Simple Counter
 void prog_counter(int delay_count)
 {
-  static int dw = 0;
-  static int dw2 = 0;
-  static int dw3 = 0;
+  // Get parameters from switches
+  cpu_state.r[1] = (cpu_state.r[0] & 0x00ff) + 1;
+  cpu_state.r[2] = ((cpu_state.r[0] & 0xff00) >> 8) + 1;
+
+  // Accumulate
+  cpu_state.r[3] += cpu_state.r[1];
   
-  dw2 = (cpu_state.r[0] & 0x00ff) + 1;
+  panel_write_word(L_REG_ADDR_LO, cpu_state.r[3]);
   
-  dw += dw2;
-  panel_write_word(L_REG_ADDR_LO,dw);
+  cpu_state.r[4] -= cpu_state.r[2];
   
-  dw2 = ((cpu_state.r[0] & 0xff00) >> 8) + 1;
-  dw3 -= dw2;
-  
-  panel_write_word(L_REG_DATA_LO,dw3);
+  panel_write_word(L_REG_DATA_LO, cpu_state.r[4]);
   
   if (delay_count > 0)
   {
@@ -298,18 +327,19 @@ void prog_counter(int delay_count)
 // Lamp Test
 void prog_lamp_test()
 {
-  static int dw = 0;
+  // Locals:
+  //   R1 - Cyclic counter for blinking based on any switch set
   
-  dw++;
+  cpu_state.r[1]++;
 
-  if (dw < 100)
+  if (cpu_state.r[1] < 100)
   {
     panel_write_word(L_REG_ADDR_LO,0xffff);
     panel_write_word(L_REG_DATA_LO,0xffff);
     panel_write_word(L_REG_STAT_LO,0xffff);
     cpu_state.panel_status_2 = 0xff;
   }
-  else if (dw < 200)
+  else if (cpu_state.r[1] < 200)
   {
     if (cpu_state.r[0] != 0)
     {      
@@ -321,128 +351,164 @@ void prog_lamp_test()
   }
   else
   {
-    dw = 0;
+    cpu_state.r[1] = 0;
   }  
 }
 
 
 // Larson Scanner
 void prog_knight_rider()
-{  
-  static long kit = 1,          // Holds last position of scanner as bitmask
-              kit_with_scan,    // Extends the position into the selected length/size
-              min,              // Limits of effect
-              max;
-              
-  static int dir = 0,           // Direction flag
-             delay_time,
-             scan_size = 1,
-             use_nzoc = 0;
+{
+  // Locals:
+  //    R1:0 - Direction flag (0=right, 1=left)
+  //    R2   - Left-most bit in effect
+  //    R3   - Maximum of effect, factoring in NZOC flag
+  //    R4   - Rendered effect for data
+  //    R5   - Rendered effect for NZOC (lower 4 bits only)
+  //    R6   - Interator
+  //    R15  - Effect length from switches
 
-  const int C_DIR_RIGHT = 0,
-            C_DIR_LEFT  = 1;
+#define FLAGS  cpu_state.r[1]  // Bit 0 = Direction Bit, Bits 1-15 unused
+#define EFFSTB cpu_state.r[2]  // EFFect STart Bit
+#define EFFMAX cpu_state.r[3]  // EFFect MAXimum
+#define DSPDAT cpu_state.r[4]  // DiSPlay DATa
+#define DSPNZO cpu_state.r[5]  // DiSPlay data on NZOc
+#define I      cpu_state.r[6]  // Iterator
+#define EFFLEN cpu_state.r[15] // Effect length from switches
 
-  delay_time = cpu_state.r[0] & 0x00ff;         // Bits 0-7
-  scan_size = ((cpu_state.r[0] & 0x7f00) >> 8); // Bits 8-14
-  use_nzoc = (cpu_state.r[0] & 0x8000);         // Bit 15
-
-  min = 1;
-  max = 32768 >> scan_size;  // Take off 1 LED for each increase of scan_size
-
-  if (use_nzoc)
-    max <<= 4;  // Add 4 LEDs if using N/Z/O/C
-
-  kit_with_scan = kit;
-
-  for (int i = 1; i <= scan_size; i++)
+  if (m_first_tick)
   {
-    kit_with_scan |= (kit_with_scan << 1);
+    EFFSTB = 0;
+    panel_write_word(L_REG_ADDR_LO, 0);
+  }
+              
+  //static int dir = 0;
+
+  // Extract scan size from switches 8-14
+  EFFLEN = ((cpu_state.r[0] & 0x7f00) >> 8); // Bits 8-14
+
+  // Take off 1 LED for each increase of scan_size
+  EFFMAX = 15 - EFFLEN;
+
+  if (cpu_state.r[0] & 0x8000) // use_nzoc?
+  {
+    EFFMAX += 4;
   }
 
-  panel_write_word(L_REG_DATA_LO, kit_with_scan);
+  // Render the effect in R4:R5
+  DSPDAT = 0;
+  DSPNZO = 0;
+
+  for (I = EFFSTB; I <= EFFSTB + EFFLEN; I++)
+  {
+    if (I <= 15)
+    {
+      // Still in R4
+      DSPDAT |= (1 << I);
+    }
+    else
+    {
+      // Now in R5
+      DSPNZO |= (1 << (I - 16));
+    }
+  }
+
+  panel_write_word(L_REG_DATA_LO, DSPDAT);
 
   cpu_state.panel_status_2 = CLRBIT(cpu_state.panel_status_2, L_RB_N);      
   cpu_state.panel_status_2 = CLRBIT(cpu_state.panel_status_2, L_RB_Z);      
   cpu_state.panel_status_2 = CLRBIT(cpu_state.panel_status_2, L_RB_O);      
   cpu_state.panel_status_2 = CLRBIT(cpu_state.panel_status_2, L_RB_C);          
 
-  if (use_nzoc)
+  if (cpu_state.r[0] & 0x8000) // use_nzoc?
   {
-    if (kit_with_scan & (1L << 16L))
+    if (DSPNZO & 1)
       cpu_state.panel_status_2 = SETBIT(cpu_state.panel_status_2, L_RB_N);
 
-    if (kit_with_scan & (1L << 17L))
+    if (DSPNZO & 2)
       cpu_state.panel_status_2 = SETBIT(cpu_state.panel_status_2, L_RB_Z);
   
-    if (kit_with_scan & (1L << 18L))
+    if (DSPNZO & 4)
       cpu_state.panel_status_2 = SETBIT(cpu_state.panel_status_2, L_RB_O);
 
-    if (kit_with_scan & (1L << 19L))
+    if (DSPNZO & 8)
       cpu_state.panel_status_2 = SETBIT(cpu_state.panel_status_2, L_RB_C);
 
     panel_write(L_REG_STAT_HI, cpu_state.panel_status_2);
   }
 
-  if (dir == C_DIR_RIGHT)
+  if ((FLAGS & 0x01) == 0) // Moving Right
   {
-    if (kit >= max || kit <= 0)
+    if (EFFSTB >= EFFMAX || EFFSTB < 0)
     {
-      dir = C_DIR_LEFT;
-      kit >>= 1;
+      FLAGS = SETBIT(FLAGS, 0); // Change dir to left
+      EFFSTB--;
     }
     else
     {
-      kit <<= 1;
+      EFFSTB++;
     }
   }
-  else /* C_DIR_LEFT */
+  else /* Moving Left */
   {
-    if (kit <= min)
+    if (EFFSTB <= 0)
     {
-      dir = C_DIR_RIGHT;
-      kit <<= 1;
+      FLAGS = CLRBIT(FLAGS, 0); // Change dir to right
+      EFFSTB++;
+    }
+    else if (EFFSTB > EFFMAX)
+    {
+      // Overflowed
+      FLAGS = CLRBIT(FLAGS, 0); // Change dir to right
+      EFFSTB = EFFMAX;
     }
     else
     {
-      kit >>= 1;
+      EFFSTB--;
     }
   }
 
-  delay(delay_time * 10);
+  delay( (cpu_state.r[0] & 0x00ff) * 10); // Switches 0-7 x10
+
+#undef EFFSTB
+#undef EFFLEN
+#undef EFFMAX
+#undef DSPDAT
+#undef DSPNZO
+#undef I
+#undef FLAGS
 }
+
 
 
 // Debug program used to read any register from the panel
 void prog_debug()
 {
-  static int addr;
-  static int addr_disp;
-  static int data;
+  // Locals:
+  //   R1 - Address from CPU/EAU
+  //   R2 - Displayed switch state
+  //   R3 - Data as read from address
+  
+  //r1: static int addr;
+  //r2: static int addr_disp;
+  //r3: static int data;
   
   /* clock switches into output buffers */
   panel_write(7, 0);
 
   // Get read address from CPU/EAU
-  addr = (panel_read(5) >> 5) & 0x07;
+  cpu_state.r[1] = (panel_read(5) >> 5) & 0x07;
 
   // Add in switch state
-  addr_disp = addr;
+  cpu_state.r[2] = cpu_state.r[1];
 
-  if (cpu_state.hw_bits & L_MCLEAR) addr_disp |= 16;
-  if (cpu_state.hw_bits & L_HALT)   addr_disp |= 32;
-  if (cpu_state.hw_bits & L_BPHLT)  addr_disp |= 64;
-  if (cpu_state.hw_bits & L_CSLINT) addr_disp |= 128;
+  if (cpu_state.hw_bits & L_MCLEAR) cpu_state.r[2] |= 16;
+  if (cpu_state.hw_bits & L_HALT)   cpu_state.r[2] |= 32;
+  if (cpu_state.hw_bits & L_BPHLT)  cpu_state.r[2] |= 64;
+  if (cpu_state.hw_bits & L_CSLINT) cpu_state.r[2] |= 128;
   
-  panel_write(L_REG_ADDR_LO, addr_disp); // AAA_ SSSS
+  panel_write(L_REG_ADDR_LO, cpu_state.r[2]); // AAA_ SSSS
 
-  data = panel_read(addr);
-  panel_write(L_REG_DATA_LO, data); // Echo data to data lo byte
-
-  // This is a bad idea...
-  //if (cpu_state.hw_bits & L_CSLINT)
-  //{
-  //  // Clock contents of R0(LOW) into address
-  //  data = cpu_state.r[0] & 0x0f;
-  //  panel_write(addr, data);
-  //}  
+  cpu_state.r[3] = panel_read(cpu_state.r[1]);
+  panel_write(L_REG_DATA_LO, cpu_state.r[3]); // Echo data to data lo byte
 }

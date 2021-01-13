@@ -6,29 +6,30 @@
  * 
  * Revision History
  * 12/08/2020       Added to github, added 2nd option for program 0
+ * 01/13/2020       Refactored to use more pseudo-registers
  * 
  * Target:  Arduino Nano
  * 
  * I/O Map:
  * 
  * NANO  DESC         MODCOMP
- * D12 = Data 4     = 02
- * D11 = Data 3     = 04
- * D10 = Data 2     = 06
- * D09 = Data 1     = 08
- * D08 = Data 6     = 10
+ * D02 = Data 4     = 02
+ * D03 = Data 3     = 04
+ * D04 = Data 2     = 06
+ * D05 = Data 1     = 08
+ * D06 = Data 6     = 10
  * D07 = Data 5     = 12
- * D06 = Data 7     = 14
- * D05 = Data 8     = 16
- * D04 = RS 0       = 18
- * D03 = RS 2       = 20
- * D02 = RS 1       = 22
- * D13 = CLOCK      = 24
- * A00 = READ/WRITE = 30
- * A01 = HALT       = 34
- * A02 = M CLEAR    = 36
- * A03 = CSL INT    = 38
- * A04 = BL-HLT     = 40
+ * D08 = Data 7     = 14
+ * D09 = Data 8     = 16
+ * D10 = RS 0       = 18
+ * D11 = RS 2       = 20
+ * D12 = RS 1       = 22
+ * A04 = CLOCK      = 24
+ * A03 = READ/WRITE = 30
+ * A02 = HALT       = 34
+ * A01 = M CLEAR    = 36
+ * A00 = CSL INT    = 38
+ * D13 = BP-HLT     = 40
  * A05 = unused
  * A06 = unused (I ONLY)
  * A07 = unused (I ONLY)
@@ -42,23 +43,23 @@
 #include "mc_panel.h"
 
 // Arduino I/O Pin Mapping
-#define P_D1            9
-#define P_D2            10
-#define P_D3            11
-#define P_D4            12
+#define P_D1            5
+#define P_D2            4
+#define P_D3            3
+#define P_D4            2
 #define P_D5            7
-#define P_D6            8
-#define P_D7            6
-#define P_D8            5
-#define P_RS0           4
-#define P_RS1           2
-#define P_RS2           3
-#define P_CLOCK         A0
-#define P_RW            13
-#define P_HALT          A1
-#define P_MCLEAR        A2
-#define P_CSLINT        A3
-#define P_BPHLT         A4
+#define P_D6            6
+#define P_D7            8
+#define P_D8            9
+#define P_RS0           10
+#define P_RS1           12
+#define P_RS2           11
+#define P_CLOCK         A3
+#define P_RW            A4
+#define P_HALT          A2
+#define P_MCLEAR        A1
+#define P_CSLINT        A0
+#define P_BPHLT         13
 
 // Logicals
 #define L_READ          HIGH
@@ -261,8 +262,19 @@ void loop() {
   static byte toggle = 0;
 
   cpu_pre_execute();
-  cpu_execute();
+  cpu_execute();  
   return;
+
+  /*panel_write(L_REG_ADDR_LO, scan);
+
+  scan <<= 1;
+
+  if (scan > 255 || scan < 0)
+    scan = 1;
+
+  delay(250);
+
+  return;*/
 
 #define READ_TEST 1
 

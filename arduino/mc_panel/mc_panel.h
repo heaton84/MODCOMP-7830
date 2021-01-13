@@ -88,27 +88,27 @@ extern "C" {
 // CPU State Structure
 struct s_cpu_state
 {
-  int r[16];          // R0=switches, R1..R15=unused for now (was going to write a CPU emulator...)
-  int pr;             // Program Register (also unused for now)
-  int state;          // NZOC,IO,TASK,MERR,RUN (also unused for now)
+  short r[16];          // R0=switches, R1..R15=unused for now (was going to write a CPU emulator...)
+  short pr;             // Program Register (also unused for now)
+  short state;          // NZOC,IO,TASK,MERR,RUN (also unused for now)
 
-  int hw_bits;        // Hardwired status bits
+  short hw_bits;        // Hardwired status bits
 
-  int panel_reg_sel;  // Selected register on panel
-  int panel_ctxt;     // Map/IOP/MBC/CTXT context
-  int panel_ccdb;     // CPU Control DeBounce word (1-shot)
-  int panel_ccn;      // CPU Control Nibble
-  int panel_dspn;     // display nibble
+  short panel_reg_sel;  // Selected register on panel
+  short panel_ctxt;     // Map/IOP/MBC/CTXT context
+  short panel_ccdb;     // CPU Control DeBounce word (1-shot)
+  short panel_ccn;      // CPU Control Nibble
+  short panel_dspn;     // display nibble
 
-  int boot_state;     // Boot state of CPU
+  short boot_state;     // Boot state of CPU
 
   // Registers for buffering output to display
-  int panel_address;
-  int panel_data;
-  int panel_status_1; // Lo word of status
-  int panel_status_2; // Hi word of status
+  short panel_address;
+  short panel_data;
+  short panel_status_1; // Lo word of status
+  short panel_status_2; // Hi word of status
 
-  int emu_options;    // Emulation Options, clocked in by ENT REG during a HALT
+  short emu_options;    // Emulation Options, clocked in by ENT REG during a HALT
 };
 
 // Useful Macros
@@ -132,6 +132,7 @@ void cpu_init();
 void cpu_pre_execute();
 void cpu_execute();
 void cpu_display_output();
+void cpu_display_halt();
 
 void prog_run_sim();
 void prog_counter(int);
